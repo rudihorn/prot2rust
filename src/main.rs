@@ -32,7 +32,7 @@ fn render_mac() -> Result<()> {
     let panid = AlternativeOptions::new("panid", &pan_none).insert_struct(&pan_short);
 
     let structure = Structure::new("mhr")
-        .add_u16_field("frame_control")
+        .add_bitfield("frame_control", "frame_control", 2)
         .add_u8_field("sequence_number")
         .add_alt_field("dest_pan", &panid)
         .add_alt_field("dest_address", &address)

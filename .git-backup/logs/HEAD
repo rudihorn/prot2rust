@@ -1,0 +1,4 @@
+0000000000000000000000000000000000000000 7264731e4796c3b39a302fae89eab36d33a5008d Rudi Horn <rudi.horn@oracle.com> 1647894539 +0000	clone: from https://github.com/rust-embedded/svd2rust.git
+7264731e4796c3b39a302fae89eab36d33a5008d f8960dd412f1c7885caa492d1106225dd484ce99 Rudi Horn <rudi.horn@oracle.com> 1648371386 +0000	commit: initial commit
+f8960dd412f1c7885caa492d1106225dd484ce99 cfdc4d139abf5a0db3b625abcf4d5e7b1f3f74f0 Rudi Horn <rudi.horn@oracle.com> 1648491907 +0000	commit: initial commit
+cfdc4d139abf5a0db3b625abcf4d5e7b1f3f74f0 c79ebc13da0c83628be20ebd953ff5bd99f5c702 Rudi Horn <rudi.horn@oracle.com> 1648492074 +0000	commit: do changes

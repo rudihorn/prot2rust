@@ -19,6 +19,25 @@ impl PrimitiveMember {
     }
 }
 
+pub struct BitfieldMember {
+    pub name: String,
+    pub bitfield: String,
+    pub bytes: u32,
+}
+
+impl BitfieldMember {
+    pub fn new(name: &str, bitfield: &str, bytes: u32) -> Self {
+        let name = String::from(name);
+        let bitfield = String::from(bitfield);
+
+        Self {
+            name,
+            bitfield,
+            bytes,
+        }
+    }
+}
+
 pub struct AlternativesMember {
     pub name: String,
     pub alternatives: String,
@@ -33,6 +52,7 @@ impl AlternativesMember {
 }
 
 pub enum StructMember {
+    BitfieldMember(BitfieldMember),
     PrimitiveMember(PrimitiveMember),
     AlternativesMember(AlternativesMember),
 }
@@ -92,6 +112,12 @@ impl Structure {
             name,
             members: vec![],
         }
+    }
+
+    pub fn add_bitfield(mut self, name: &str, bitfield: &str, bytes: u32) -> Self {
+        let member = BitfieldMember::new(name, bitfield, bytes);
+        self.members.push(StructMember::BitfieldMember(member));
+        self
     }
 
     pub fn add_prim_field(mut self, name: &str, bytes: u32) -> Self {
@@ -195,6 +221,36 @@ pub fn render(structures: &Vec<Structure>, alternatives: &Alternatives) -> Resul
 
         for mem in &structure.members {
             match mem {
+                StructMember::BitfieldMember(mem) => {
+                    let ty_name = Ident::new(&mem.bitfield.to_sanitized_pascal_case(), span);
+                    let pkg_name = Ident::new(&mem.bitfield.to_sanitized_snake_case(), span);
+                    let mem_name = Ident::new(&mem.name.to_sanitized_snake_case(), span);
+                    let sty = (mem.bytes * 8).to_ty()?;
+
+                    str_mems.extend(quote! { pub #mem_name : #ty_name, });
+
+                    inst_default.extend(quote! {
+                        #mem_name : #ty_name::new(),
+                    });
+                    mod_items.extend(quote! {
+                        pub struct #ty_name { bits : #sty }
+
+                        impl #ty_name {
+                            pub fn new() -> Self {
+                                Self { bits : 0 }
+                            }
+
+                            pub fn read(&self) -> crate::#pkg_name::R {
+                                crate::#pkg_name::R::new(self.bits)
+                            }
+
+                            pub fn modify<'a, F>(&'a mut self, f : F) where for <'w> F : FnOnce(&'w mut crate::#pkg_name::W) -> &'w mut crate::#pkg_name::W {
+                                let bits = self.bits;
+                                self.bits = **f(&mut crate::#pkg_name::W::new(bits))
+                            }
+                        }
+                    });
+                }
                 StructMember::PrimitiveMember(mem) => {
                     let mem_name = Ident::new(&mem.name.to_sanitized_snake_case(), span);
                     let sty = (mem.bytes * 8).to_ty()?;

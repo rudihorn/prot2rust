@@ -1,0 +1,16 @@
+do changes
+
+# Please enter the commit message for your changes. Lines starting
+# with '#' will be ignored, and an empty message aborts the commit.
+#
+# On branch master
+# Your branch is ahead of 'origin/master' by 2 commits.
+#   (use "git push" to publish your local commits)
+#
+# Changes to be committed:
+#	deleted:    CHANGELOG.md
+#	modified:   src/generate/bitfield.rs
+#	modified:   src/generate/structure.rs
+#	modified:   src/util.rs
+#	deleted:    triagebot.toml
+#
