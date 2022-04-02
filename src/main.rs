@@ -1,6 +1,8 @@
 #![recursion_limit = "128"]
 
+use generate::structure::SimpleStructure;
 use log::error;
+use proc_macro2::TokenStream;
 use crate::generate::structure::AlternativeOptions;
 use crate::generate::structure::Alternatives;
 
@@ -19,17 +21,30 @@ fn render_mac() -> Result<()> {
     let filename = "out/mac_frame.rs";
     let mut file = File::create(filename).expect("Could not create output file.");
 
-    let addr_none = Structure::new("addr_none");
-    let addr_short = Structure::new("addr_short").add_u16_field("address");
-    let addr_extended = Structure::new("addr_extended").add_u64_field("address");
+    let mut items = TokenStream::new();
 
-    let pan_none = Structure::new("pan_none");
-    let pan_short = Structure::new("pan_short").add_u16_field("pan");
+    let addr_none = Structure::new("addr_none");
+    let addr_short = SimpleStructure::new("addr_short", "address", 2);
+    let addr_extended = SimpleStructure::new("addr_extended", "address", 8);
+
+    items.extend(generate::structure::render(&addr_none)?);
+    items.extend(generate::structure::render_simple(&addr_short)?);
+    items.extend(generate::structure::render_simple(&addr_extended)?);
 
     let address = AlternativeOptions::new("address", &addr_none)
-        .insert_struct(&addr_short)
-        .insert_struct(&addr_extended);
-    let panid = AlternativeOptions::new("panid", &pan_none).insert_struct(&pan_short);
+        .insert_type(&addr_short)
+        .insert_type(&addr_extended);
+
+    let pan_none = Structure::new("pan_none");
+    let pan_short = SimpleStructure::new("pan_short", "pan", 2);
+
+    items.extend(generate::structure::render(&pan_none)?);
+    items.extend(generate::structure::render_simple(&pan_short)?);
+
+    let panid = AlternativeOptions::new("panid", &pan_none).insert_type(&pan_short);
+
+    let alternatives = Alternatives::new().insert(&address).insert(&panid);
+    items.extend(generate::structure::render_alternatives(&alternatives)?);
 
     let structure = Structure::new("mhr")
         .add_bitfield("frame_control", "frame_control", 2)
@@ -39,18 +54,7 @@ fn render_mac() -> Result<()> {
         .add_alt_field("source_pan", &panid)
         .add_alt_field("source_address", &address);
 
-    let alternatives = Alternatives::new().insert(address).insert(panid);
-
-    let structs = vec![
-        addr_none,
-        addr_short,
-        addr_extended,
-        pan_none,
-        pan_short,
-        structure,
-    ];
-
-    let items = generate::structure::render(&structs, &alternatives)?;
+    items.extend(generate::structure::render_with_alts(&structure, &alternatives)?);
 
     let data = items.to_string().replace("] ", "]\n");
     file.write_all(data.as_ref())
