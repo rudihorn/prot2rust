@@ -4,7 +4,7 @@ use quote::quote;
 
 use crate::util::{self, ToSanitizedPascalCase, ToSanitizedSnakeCase, U32Ext};
 
-pub struct EnumeratedValue(pub String, pub u64);
+pub struct EnumeratedValue(pub String, pub String, pub u64);
 
 pub struct BitFieldMember {
     pub name: String,
@@ -25,9 +25,14 @@ impl BitFieldMember {
         }
     }
 
-    pub fn add_enum_value(mut self, name: &str, bits: u64) -> Self {
+    pub fn add_enum_value(self, name: &str, bits: u64) -> Self {
+        self.add_enum_value_desc(name, "", bits)
+    }
+
+    pub fn add_enum_value_desc(mut self, name: &str, desc: &str, bits: u64) -> Self {
         let name = String::from(name);
-        self.enumerated_values.push(EnumeratedValue(name, bits));
+        let desc = String::from(desc);
+        self.enumerated_values.push(EnumeratedValue(name, desc, bits));
         self
     }
 }
@@ -111,7 +116,7 @@ pub fn add_field(
     let mut ev_setters = TokenStream::new();
     let mut ev_variants = TokenStream::new();
 
-    for EnumeratedValue(key, val) in &field.enumerated_values {
+    for EnumeratedValue(key, desc, val) in &field.enumerated_values {
         let key_pc = Ident::new(&key.to_sanitized_pascal_case(), span);
         let key_sc = Ident::new(&key.to_sanitized_snake_case(), span);
         let is_key_sc = Ident::new(&format!("is_{}", key_sc), span);
@@ -136,6 +141,7 @@ pub fn add_field(
         });
 
         evs.extend(quote! {
+            #[doc = #desc]
             #key_pc = #val_us,
         });
 
