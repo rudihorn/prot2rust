@@ -4,8 +4,8 @@ authors = [
 ]
 edition = "2018"
 license = "MIT OR Apache-2.0"
-name = "svd2rust"
-repository = "https://github.com/rust-embedded/svd2rust/"
+name = "prot2rust"
+repository = "https://github.com/rudihorn/prot2rust/"
 version = "0.1.0"
 readme = "README.md"
 
