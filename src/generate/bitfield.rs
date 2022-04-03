@@ -158,7 +158,7 @@ pub fn add_field(
         });
     }
 
-    let noptions = 1 << field.bitsize;
+    let noptions = 1 << field.bitsize.to_ty_width()?;
     if field.enumerated_values.len() < noptions {
         ev_variants.extend(quote! {
             _ => unreachable!(),
