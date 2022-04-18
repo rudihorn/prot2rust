@@ -1,0 +1,66 @@
+use std::fs::File;
+use std::io::Write;
+
+use anyhow::Result;
+use proc_macro2::TokenStream;
+use quote::quote;
+use structure::{Alternatives, SimpleStructure, Structure};
+
+use crate::generate::structure;
+
+pub struct GenFile {
+    items: TokenStream,
+    any: bool,
+}
+
+impl GenFile {
+    pub fn new() -> Self {
+        GenFile {
+            items: TokenStream::new(),
+            any: false,
+        }
+    }
+
+    pub fn add_simple_structure(&mut self, s: &SimpleStructure) -> Result<()> {
+        self.items.extend(structure::render_simple(s)?);
+        Ok(())
+    }
+
+    pub fn add_struct_with_alts(&mut self, s: &Structure, alts: &Alternatives) -> Result<()> {
+        self.items.extend(structure::render_with_alts(s, alts)?);
+        Ok(())
+    }
+
+    pub fn add_alternatives(&mut self, alts: &Alternatives) -> Result<()> {
+        self.items.extend(structure::render_alternatives(alts)?);
+        Ok(())
+    }
+
+    pub fn add_struct(&mut self, s: &Structure) -> Result<()> {
+        self.items.extend(structure::render(s)?);
+        Ok(())
+    }
+
+    pub fn write_file(&self, path: &str) -> Result<()> {
+        let mut file = File::create(path).expect("Could not create output file.");
+
+        let mut dat = TokenStream::new();
+
+        if self.any {
+            dat.extend(quote! {
+                use core::prelude::rust_2021::derive;
+            });
+        }
+
+        let items = &self.items;
+        dat.extend(quote! {
+            #items
+        });
+
+        let data = dat.to_string().replace("] ", "]\n");
+        file.write_all(data.as_ref())
+            .expect("Could not write file.");
+
+        Ok(())
+    }
+}
