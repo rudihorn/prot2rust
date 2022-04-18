@@ -4,8 +4,10 @@ use std::io::Write;
 use anyhow::Result;
 use proc_macro2::TokenStream;
 use quote::quote;
+use bitfield::BitField;
 use structure::{Alternatives, SimpleStructure, Structure};
 
+use crate::generate::bitfield;
 use crate::generate::structure;
 
 pub struct GenFile {
@@ -38,6 +40,11 @@ impl GenFile {
 
     pub fn add_struct(&mut self, s: &Structure) -> Result<()> {
         self.items.extend(structure::render(s)?);
+        Ok(())
+    }
+
+    pub fn add_bitfield(&mut self, bitfield : &BitField) -> Result<()> {
+        self.items.extend(bitfield::render(&bitfield)?);
         Ok(())
     }
 
