@@ -21,7 +21,7 @@ impl GenFile {
         }
     }
 
-    pub fn add_simple_structure(&mut self, s: &SimpleStructure) -> Result<()> {
+    pub fn add_struct_simple(&mut self, s: &SimpleStructure) -> Result<()> {
         self.items.extend(structure::render_simple(s)?);
         Ok(())
     }
