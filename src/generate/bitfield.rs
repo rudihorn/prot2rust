@@ -109,7 +109,7 @@ pub fn add_field(
 
     let field_pos = (structsize - offset - field.bitsize) as u64;
     let field_offset = &util::unsuffixed(field_pos);
-    let field_mask = &util::hex(1 << field.bitsize - 1);
+    let field_mask = &util::hex((1 << field.bitsize) - 1);
 
     let mut evs = TokenStream::new();
     let mut ev_checkers = TokenStream::new();
