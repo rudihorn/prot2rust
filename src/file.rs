@@ -2,9 +2,9 @@ use std::fs::File;
 use std::io::Write;
 
 use anyhow::Result;
+use bitfield::BitField;
 use proc_macro2::TokenStream;
 use quote::quote;
-use bitfield::BitField;
 use structure::{Alternatives, SimpleStructure, Structure};
 
 use crate::generate::bitfield;
@@ -43,7 +43,7 @@ impl GenFile {
         Ok(())
     }
 
-    pub fn add_bitfield(&mut self, bitfield : &BitField) -> Result<()> {
+    pub fn add_bitfield(&mut self, bitfield: &BitField) -> Result<()> {
         self.items.extend(bitfield::render(&bitfield)?);
         Ok(())
     }

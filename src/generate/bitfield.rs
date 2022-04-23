@@ -32,7 +32,8 @@ impl BitFieldMember {
     pub fn add_enum_value_desc(mut self, name: &str, desc: &str, bits: u64) -> Self {
         let name = String::from(name);
         let desc = String::from(desc);
-        self.enumerated_values.push(EnumeratedValue(name, desc, bits));
+        self.enumerated_values
+            .push(EnumeratedValue(name, desc, bits));
         self
     }
 }
@@ -107,7 +108,13 @@ pub fn add_field(
     let fty = (field.bitsize as u32).to_ty()?;
     let sty = (structsize as u32).to_ty()?;
 
-    let field_pos = (structsize - offset - field.bitsize) as u64;
+    let reverse_order = false;
+
+    let field_pos = if reverse_order {
+        (structsize - offset - field.bitsize) as u64
+    } else {
+        offset as u64
+    };
     let field_offset = &util::unsuffixed(field_pos);
     let field_mask = &util::hex((1 << field.bitsize) - 1);
 
