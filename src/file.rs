@@ -1,5 +1,7 @@
+use std::fs::create_dir_all;
 use std::fs::File;
 use std::io::Write;
+use std::path::Path;
 
 use anyhow::Result;
 use bitfield::BitField;
@@ -49,6 +51,11 @@ impl GenFile {
     }
 
     pub fn write_file(&self, path: &str) -> Result<()> {
+        let path = Path::new(path);
+        if let Some(dir) = path.parent() {
+            create_dir_all(dir)?;
+        }
+
         let mut file = File::create(path).expect("Could not create output file.");
 
         let mut dat = TokenStream::new();
