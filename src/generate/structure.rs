@@ -239,8 +239,9 @@ pub fn render_alternatives(alternatives: &Alternatives) -> Result<TokenStream> {
                     }
                 }
             });
+
             alt_enum_entries.extend(quote! {
-                #alt_enum,
+                #alt_enum(#alt_struct),
             });
         }
 
@@ -278,6 +279,7 @@ pub fn render_simple(structure: &SimpleStructure) -> Result<TokenStream> {
             pub fn new() -> Self {
                 Self { #mem_name : 0 }
             }
+
             pub fn get(&self) -> #sty {
                 self.#mem_name
             }

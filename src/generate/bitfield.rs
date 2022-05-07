@@ -236,13 +236,13 @@ pub fn add_field(
         impl<'a> #field_name_pc_w<'a> {
             #[inline(always)]
             pub fn variant(self, variant: #field_name_pc_a) -> &'a mut W {
-                self.bits(variant.into())
+                unsafe { self.bits(variant.into()) }
             }
 
             #ev_setters
 
             #[inline(always)]
-            pub fn bits(self, value: #fty) -> &'a mut W {
+            pub unsafe fn bits(self, value: #fty) -> &'a mut W {
                 self.w.bits = (self.w.bits & !(#field_mask << #field_offset)) | ((value as #sty & #field_mask) << #field_offset);
                 self.w
             }
@@ -294,10 +294,12 @@ pub fn render(structure: &BitField) -> Result<TokenStream> {
 
     mod_items.extend(quote! {
         #[doc = #desc]
+        #[derive(Clone, Copy, Debug, PartialEq)]
         pub struct R {
             bits : #sty,
         }
 
+        #[derive(Clone, Copy, Debug, PartialEq)]
         pub struct W {
             bits : #sty,
         }
