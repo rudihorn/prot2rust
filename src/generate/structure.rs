@@ -250,7 +250,7 @@ pub fn render_alternatives(alternatives: &Alternatives) -> Result<TokenStream> {
                 fn default() -> Self;
             }
 
-            enum #alt_pc_a {
+            pub enum #alt_pc_a {
                 #alt_enum_entries
             }
         });
