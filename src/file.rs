@@ -40,6 +40,11 @@ impl GenFile {
         Ok(())
     }
 
+    pub fn add_struct_imports(&mut self) -> Result<()> {
+        self.items.extend(structure::render_imports());
+        Ok(())
+    }
+
     pub fn add_struct(&mut self, s: &Structure) -> Result<()> {
         self.items.extend(structure::render(s)?);
         Ok(())

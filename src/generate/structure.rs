@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::quote;
 
-use crate::util::{ToSanitizedPascalCase, ToSanitizedSnakeCase, U32Ext};
+use crate::util::{unsuffixed, ToSanitizedPascalCase, ToSanitizedSnakeCase, U32Ext};
 
 pub trait Type {
     fn name<'a>(&'a self) -> &'a str;
@@ -227,10 +227,14 @@ pub fn render_alternatives(alternatives: &Alternatives) -> Result<TokenStream> {
         let alt_pc_a = Ident::new(&format!("{}A", alt_pc), span);
 
         let mut alt_enum_entries = TokenStream::new();
+        let mut write_entries = TokenStream::new();
+        let mut read_funs = TokenStream::new();
 
         for altopt in &alt.alternatives {
             let alt_struct = Ident::new(&altopt.to_sanitized_pascal_case(), span);
             let alt_enum = Ident::new(&altopt.to_sanitized_pascal_case(), span);
+            let alt_enum_read = Ident::new(&format!("read_{}", altopt.to_sanitized_snake_case()), span);
+
 
             trait_extends.extend(quote! {
                 impl #alt_pc for #alt_struct {
@@ -243,7 +247,20 @@ pub fn render_alternatives(alternatives: &Alternatives) -> Result<TokenStream> {
             alt_enum_entries.extend(quote! {
                 #alt_enum(#alt_struct),
             });
+
+            write_entries.extend(quote! {
+                #alt_pc_a::#alt_enum(v) => v.write(out),
+            });
+
+            read_funs.extend(quote! {
+                pub fn #alt_enum_read<R>(reader : &mut R) -> Result<Self, Error> where R : Read {
+                    Ok(#alt_pc_a::#alt_enum(#alt_struct::read(reader)?))
+                }
+            });
         }
+
+        let hd = &alt.alternatives[0];
+        let def_alt_struct = Ident::new(&hd.to_sanitized_pascal_case(), span);
 
         mod_items.extend(quote! {
             pub trait #alt_pc : Copy {
@@ -252,6 +269,20 @@ pub fn render_alternatives(alternatives: &Alternatives) -> Result<TokenStream> {
 
             pub enum #alt_pc_a {
                 #alt_enum_entries
+            }
+
+            impl #alt_pc_a {
+                pub fn default() -> Self {
+                    Self::#def_alt_struct(#def_alt_struct::default())
+                }
+
+                pub fn write<W>(&self, out : &mut W) -> Result<(), Error> where W : Write {
+                    match self {
+                        #write_entries
+                    }
+                }
+
+                #read_funs
             }
         });
     }
@@ -268,6 +299,7 @@ pub fn render_simple(structure: &SimpleStructure) -> Result<TokenStream> {
     let str_name = Ident::new(&structure.name.to_sanitized_pascal_case(), span);
     let mem_name = Ident::new(&structure.member.name.to_sanitized_snake_case(), span);
     let sty = (structure.member.bytes * 8).to_ty()?;
+    let bytes = unsuffixed(structure.member.bytes as u64);
 
     mod_items.extend(quote! {
         #[derive(Clone, Copy, Debug, PartialEq)]
@@ -288,6 +320,17 @@ pub fn render_simple(structure: &SimpleStructure) -> Result<TokenStream> {
                 self.#mem_name = v;
                 self
             }
+
+            pub fn write<W>(&self, out : &mut W) -> Result<(), Error> where W : Write {
+                out.write(&self.#mem_name.to_be_bytes())?;
+                Ok(())
+            }
+
+            pub fn read<R>(reader : &mut R) -> Result<Self, Error> where R : Read {
+                let mut bytes = [0u8; #bytes];
+                reader.read_exact(&mut bytes)?;
+                Ok(Self { #mem_name : #sty::from_be_bytes(bytes) })
+            }
         }
     });
 
@@ -301,8 +344,10 @@ pub fn render_with_alts(structure: &Structure, alternatives: &Alternatives) -> R
 
     let str_name = Ident::new(&structure.name.to_sanitized_pascal_case(), span);
     let str_name_def = Ident::new(&format!("{}Default", str_name), span);
+    let str_name_gen = Ident::new(&format!("{}Generic", str_name), span);
 
     let mut str_mems = TokenStream::new();
+    let mut str_mems_gen = TokenStream::new();
     let mut templ = TokenStream::new();
     let mut default_templ = TokenStream::new();
 
@@ -311,6 +356,13 @@ pub fn render_with_alts(structure: &Structure, alternatives: &Alternatives) -> R
 
     let mut str_items = TokenStream::new();
     let mut str_fns = TokenStream::new();
+
+    let mut default_mems = TokenStream::new();
+    let mut read_mem = TokenStream::new();
+    let mut read_mems = TokenStream::new();
+    let mut write_mem = TokenStream::new();
+
+    let mut has_alt = false;
 
     for mem in &structure.members {
         match mem {
@@ -325,6 +377,8 @@ pub fn render_with_alts(structure: &Structure, alternatives: &Alternatives) -> R
                 templ.extend(quote! { #alt_name_templ, });
                 where_clause.extend(quote! { #alt_name_templ : #alt_trait, });
                 default_templ.extend(quote! { #alt_default, });
+
+                has_alt = true;
             }
             _ => {}
         }
@@ -339,14 +393,17 @@ pub fn render_with_alts(structure: &Structure, alternatives: &Alternatives) -> R
 
         let mut default_value = TokenStream::new();
         let mut mem_ty = TokenStream::new();
+        let mut mem_ty_gen = TokenStream::new();
 
         match mem {
             StructMember::BitfieldMember(mem) => {
                 let pkg_name = Ident::new(&mem.bitfield.to_sanitized_snake_case(), span);
                 let sty = (mem.bytes * 8).to_ty()?;
+                let bytes = unsuffixed(mem.bytes as u64);
 
                 default_value.extend(quote! { 0 });
                 mem_ty.extend(quote! {#sty});
+                mem_ty_gen.extend(quote! {#sty});
 
                 str_fns.extend(quote! {
                     pub fn #mem_name(&mut self) -> #ty_name<#templ> {
@@ -356,23 +413,38 @@ pub fn render_with_alts(structure: &Structure, alternatives: &Alternatives) -> R
 
                 mem_str_impl.extend(quote! {
                         #[inline(always)]
-                        pub fn read(&self) -> crate::#pkg_name::R {
-                            crate::#pkg_name::R::new(self.data.#mem_name)
+                        pub fn read(&self) -> super::#pkg_name::R {
+                            super::#pkg_name::R::new(self.data.#mem_name)
                         }
 
                         #[inline(always)]
-                        pub fn modify<F>(&'a mut self, f : F) -> &'a mut #str_name<#templ> where for <'w> F : FnOnce(&'w mut crate::#pkg_name::W) -> &'w mut crate::#pkg_name::W {
+                        pub fn modify<F>(&'a mut self, f : F) -> &'a mut #str_name<#templ> where for <'w> F : FnOnce(&'w mut super::#pkg_name::W) -> &'w mut super::#pkg_name::W {
                             let bits = self.data.#mem_name;
-                            self.data.#mem_name = **f(&mut crate::#pkg_name::W::new(bits));
+                            self.data.#mem_name = **f(&mut super::#pkg_name::W::new(bits));
                             self.data
                         }
-                    });
+                });
+
+                default_mems.extend(quote! {#mem_name : 0,});
+
+                read_mem.extend(quote! {
+                    let mut buffer = [0u8; #bytes];
+                    reader.read_exact(&mut buffer)?;
+                    let #mem_name = #sty::from_be_bytes(buffer);
+                });
+                read_mems.extend(quote! {#mem_name, });
+
+                write_mem.extend(quote! {
+                    out.write(&self.#mem_name.to_be_bytes())?;
+                });
             }
             StructMember::PrimitiveMember(mem) => {
                 let sty = (mem.bytes * 8).to_ty()?;
+                let bytes = unsuffixed(mem.bytes as u64);
 
                 default_value.extend(quote! { 0 });
                 mem_ty.extend(quote! {#sty});
+                mem_ty_gen.extend(quote! {#sty});
 
                 str_fns.extend(quote! {
                     pub fn #mem_name(&mut self) -> #ty_name<#templ> {
@@ -392,13 +464,31 @@ pub fn render_with_alts(structure: &Structure, alternatives: &Alternatives) -> R
                         self.data
                     }
                 });
+
+                default_mems.extend(quote! {#mem_name : 0,});
+
+                read_mem.extend(quote! {
+                    let mut buffer = [0u8; #bytes];
+                    reader.read_exact(&mut buffer)?;
+                    let #mem_name = #sty::from_be_bytes(buffer);
+                });
+                read_mems.extend(quote! {#mem_name, });
+
+                write_mem.extend(quote! {
+                    out.write(&self.#mem_name.to_be_bytes())?;
+                });
             }
             StructMember::AlternativesMember(alt) => {
                 let alt_name_templ =
                     Ident::new(&format!("{}T", alt.name.to_sanitized_pascal_case()), span);
+                let alt_pc_a = Ident::new(
+                    &format!("{}A", alt.alternatives.to_sanitized_pascal_case()),
+                    span,
+                );
 
                 default_value.extend(quote! { #alt_name_templ::default() });
                 mem_ty.extend(quote! {#alt_name_templ});
+                mem_ty_gen.extend(quote! {#alt_pc_a});
 
                 str_fns.extend(quote! {
                     pub fn #mem_name(&mut self) -> #ty_name<#templ> {
@@ -419,12 +509,22 @@ pub fn render_with_alts(structure: &Structure, alternatives: &Alternatives) -> R
                         self.data
                     }
                 });
+
+                default_mems.extend(quote! {#mem_name : #mem_ty_gen::default(), });
+
+                write_mem.extend(quote! {
+                    self.#mem_name.write(out)?;
+                });
             }
         }
 
         str_mems.extend(quote! { #mem_name : #mem_ty, });
         inst_default.extend(quote! {
             #mem_name : #default_value,
+        });
+
+        str_mems_gen.extend(quote! {
+            pub #mem_name : #mem_ty_gen,
         });
 
         str_items.extend(quote! {
@@ -441,9 +541,53 @@ pub fn render_with_alts(structure: &Structure, alternatives: &Alternatives) -> R
         });
     }
 
+    if !has_alt {
+        mod_items.extend(quote! {
+            #[derive(Copy,Clone)]
+        });
+    }
+
+    let write_fun_unsafe = if has_alt {
+        quote! { unsafe }
+    } else {
+        quote! {}
+    };
+    let out_name = if write_mem.is_empty() {
+        quote! {_out}
+    } else {
+        quote! {out}
+    };
+    let write_fun = quote! {
+        pub #write_fun_unsafe fn write<W>(&self, #out_name : &mut W) -> Result<(), Error> where W : Write {
+            #write_mem
+            Ok(())
+        }
+    };
+    let maybe_write_fun = if has_alt {
+        quote! {}
+    } else {
+        quote! { #write_fun }
+    };
+
+    let reader_name = if read_mem.is_empty() {
+        quote! {_reader}
+    } else {
+        quote! {reader}
+    };
+    let read_fun = quote! {
+        pub fn read<R>(#reader_name : &mut R) -> Result<Self, Error> where R : Read {
+            #read_mem
+            Ok(Self {#read_mems})
+        }
+    };
+    let maybe_read_fun = if has_alt {
+        quote! {}
+    } else {
+        quote! { #read_fun }
+    };
+
     mod_items.extend(quote! {
         #[repr(packed)]
-        #[derive(Clone, Copy)]
         pub struct #str_name<#templ> where #where_clause {
             #str_mems
         }
@@ -459,8 +603,28 @@ pub fn render_with_alts(structure: &Structure, alternatives: &Alternatives) -> R
             }
 
             #str_fns
+
+            #maybe_write_fun
+
+            #maybe_read_fun
         }
     });
+
+    if has_alt {
+        mod_items.extend(quote! {
+            pub struct #str_name_gen {
+                #str_mems_gen
+            }
+
+            impl #str_name_gen {
+                pub fn default() -> Self {
+                    Self { #default_mems }
+                }
+
+                #write_fun
+            }
+        });
+    }
 
     if !default_templ.is_empty() {
         mod_items.extend(quote! {
@@ -469,6 +633,12 @@ pub fn render_with_alts(structure: &Structure, alternatives: &Alternatives) -> R
     }
 
     Ok(mod_items)
+}
+
+pub fn render_imports() -> TokenStream {
+    quote! {
+        use core2::io::{Error, Read, Write};
+    }
 }
 
 pub fn render(structure: &Structure) -> Result<TokenStream> {
