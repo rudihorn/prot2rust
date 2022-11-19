@@ -11,17 +11,20 @@ pub struct BitFieldMember {
     pub desc: String,
     pub bitsize: u32,
     pub enumerated_values: Vec<EnumeratedValue>,
+    pub numeric: bool,
 }
 
 impl BitFieldMember {
     pub fn new(name: &str, desc: &str, bitsize: u32) -> BitFieldMember {
         let name = String::from(name);
         let desc = String::from(desc);
+        let numeric = false;
         BitFieldMember {
             name,
             desc,
             bitsize,
             enumerated_values: vec![],
+            numeric,
         }
     }
 
@@ -34,6 +37,11 @@ impl BitFieldMember {
         let desc = String::from(desc);
         self.enumerated_values
             .push(EnumeratedValue(name, desc, bits));
+        self
+    }
+
+    pub fn numeric(mut self) -> Self {
+        self.numeric = true;
         self
     }
 }
@@ -86,6 +94,54 @@ impl MaybeField {
             &MaybeField::Reserved { bitsize } => *bitsize,
         }
     }
+}
+
+pub fn add_field_numeric(
+    field: &BitFieldMember,
+    structsize: u32,
+    offset: u32,
+    reader_impl: &mut TokenStream,
+    writer_impl: &mut TokenStream,
+) -> Result<TokenStream> {
+    let span = Span::call_site();
+    let mut mod_items = TokenStream::new();
+
+    let field_name = field.name.as_str();
+    let field_name_sc = Ident::new(&field_name.to_sanitized_snake_case(), span);
+    let field_name_pc = Ident::new(&field_name.to_sanitized_pascal_case(), span);
+    let fty = (field.bitsize as u32).to_ty()?;
+    let sty = (structsize as u32).to_ty()?;
+
+    let reverse_order = false;
+    let field_pos = if reverse_order {
+        (structsize - offset - field.bitsize) as u64
+    } else {
+        offset as u64
+    };
+    let field_offset = &util::unsuffixed(field_pos);
+    let field_mask = &util::hex((1 << field.bitsize) - 1);
+
+    let read_doc = format!("Read the `{}` field.", field_name_pc);
+    let set_doc = format!("Set the `{}` field.", field_name_pc);
+
+    reader_impl.extend(quote! {
+        #[doc = #read_doc]
+        #[inline(always)]
+        pub fn #field_name_sc(&self) -> #fty {
+            ((self.bits >> #field_offset) & #field_mask) as #fty
+        }
+    });
+
+    writer_impl.extend(quote! {
+        #[doc = #set_doc]
+        #[inline(always)]
+        pub fn #field_name_sc(&mut self, value : #fty) -> Self {
+            let bits = (self.bits & !(#field_mask << #field_offset)) | ((value as #sty & #field_mask) << #field_offset);
+                                        Self { bits, ..*self}
+        }
+    });
+
+    Ok(mod_items)
 }
 
 pub fn add_field(
@@ -317,13 +373,25 @@ pub fn render(structure: &BitField) -> Result<TokenStream> {
 
     for field in &structure.fields {
         match &field {
-            &MaybeField::Field(field) => mod_items.extend(add_field(
-                &field,
-                structsize,
-                offset,
-                &mut reader_impl,
-                &mut writer_impl,
-            )?),
+            &MaybeField::Field(field) => {
+                if field.numeric {
+                    mod_items.extend(add_field_numeric(
+                        &field,
+                        structsize,
+                        offset,
+                        &mut reader_impl,
+                        &mut writer_impl,
+                    )?)
+                } else {
+                    mod_items.extend(add_field(
+                        &field,
+                        structsize,
+                        offset,
+                        &mut reader_impl,
+                        &mut writer_impl,
+                    )?)
+                }
+            }
             _ => (),
         }
         offset += field.bitsize()

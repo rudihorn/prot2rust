@@ -1,4 +1,5 @@
 use anyhow::Result;
+use inflections::Inflect;
 
 use std::collections::HashMap;
 
@@ -6,6 +7,10 @@ use proc_macro2::{Ident, Span, TokenStream};
 use quote::quote;
 
 use crate::util::{unsuffixed, ToSanitizedPascalCase, ToSanitizedSnakeCase, U32Ext};
+
+pub fn deriving_tokens() -> TokenStream {
+    quote! {#[derive(Clone, Copy, Debug, Eq, PartialEq)]}
+}
 
 pub trait Type {
     fn name<'a>(&'a self) -> &'a str;
@@ -217,6 +222,8 @@ impl AlternativeOptions {
 }
 
 pub fn render_alternatives(alternatives: &Alternatives) -> Result<TokenStream> {
+    let deriving = deriving_tokens();
+
     let span = Span::call_site();
 
     let mut mod_items = TokenStream::new();
@@ -233,8 +240,8 @@ pub fn render_alternatives(alternatives: &Alternatives) -> Result<TokenStream> {
         for altopt in &alt.alternatives {
             let alt_struct = Ident::new(&altopt.to_sanitized_pascal_case(), span);
             let alt_enum = Ident::new(&altopt.to_sanitized_pascal_case(), span);
-            let alt_enum_read = Ident::new(&format!("read_{}", altopt.to_sanitized_snake_case()), span);
-
+            let alt_enum_read =
+                Ident::new(&format!("read_{}", altopt.to_sanitized_snake_case()), span);
 
             trait_extends.extend(quote! {
                 impl #alt_pc for #alt_struct {
@@ -267,6 +274,7 @@ pub fn render_alternatives(alternatives: &Alternatives) -> Result<TokenStream> {
                 fn default() -> Self;
             }
 
+            #deriving
             pub enum #alt_pc_a {
                 #alt_enum_entries
             }
@@ -293,6 +301,8 @@ pub fn render_alternatives(alternatives: &Alternatives) -> Result<TokenStream> {
 }
 
 pub fn render_simple(structure: &SimpleStructure) -> Result<TokenStream> {
+    let deriving = deriving_tokens();
+
     let mut mod_items = TokenStream::new();
 
     let span = Span::call_site();
@@ -302,7 +312,7 @@ pub fn render_simple(structure: &SimpleStructure) -> Result<TokenStream> {
     let bytes = unsuffixed(structure.member.bytes as u64);
 
     mod_items.extend(quote! {
-        #[derive(Clone, Copy, Debug, PartialEq)]
+        #deriving
         pub struct #str_name {
             #mem_name : #sty
         }
@@ -310,6 +320,10 @@ pub fn render_simple(structure: &SimpleStructure) -> Result<TokenStream> {
         impl #str_name {
             pub fn new() -> Self {
                 Self { #mem_name : 0 }
+            }
+
+            pub fn of_value(val : #sty) -> Self {
+                Self { #mem_name : val }
             }
 
             pub fn get(&self) -> #sty {
@@ -322,14 +336,14 @@ pub fn render_simple(structure: &SimpleStructure) -> Result<TokenStream> {
             }
 
             pub fn write<W>(&self, out : &mut W) -> Result<(), Error> where W : Write {
-                out.write(&self.#mem_name.to_be_bytes())?;
+                out.write(&self.#mem_name.to_le_bytes())?;
                 Ok(())
             }
 
             pub fn read<R>(reader : &mut R) -> Result<Self, Error> where R : Read {
                 let mut bytes = [0u8; #bytes];
                 reader.read_exact(&mut bytes)?;
-                Ok(Self { #mem_name : #sty::from_be_bytes(bytes) })
+                Ok(Self { #mem_name : #sty::from_le_bytes(bytes) })
             }
         }
     });
@@ -345,6 +359,7 @@ pub fn render_with_alts(structure: &Structure, alternatives: &Alternatives) -> R
     let str_name = Ident::new(&structure.name.to_sanitized_pascal_case(), span);
     let str_name_def = Ident::new(&format!("{}Default", str_name), span);
     let str_name_gen = Ident::new(&format!("{}Generic", str_name), span);
+    let fields_mod_name = Ident::new(&format!("{}_fields", &structure.name.to_snake_case()), span);
 
     let mut str_mems = TokenStream::new();
     let mut str_mems_gen = TokenStream::new();
@@ -352,6 +367,7 @@ pub fn render_with_alts(structure: &Structure, alternatives: &Alternatives) -> R
     let mut default_templ = TokenStream::new();
 
     let mut where_clause = TokenStream::new();
+    let mut fields_where_clause = TokenStream::new();
     let mut inst_default = TokenStream::new();
 
     let mut str_items = TokenStream::new();
@@ -376,6 +392,7 @@ pub fn render_with_alts(structure: &Structure, alternatives: &Alternatives) -> R
 
                 templ.extend(quote! { #alt_name_templ, });
                 where_clause.extend(quote! { #alt_name_templ : #alt_trait, });
+                fields_where_clause.extend(quote! { #alt_name_templ : super::#alt_trait, });
                 default_templ.extend(quote! { #alt_default, });
 
                 has_alt = true;
@@ -388,6 +405,7 @@ pub fn render_with_alts(structure: &Structure, alternatives: &Alternatives) -> R
         let mem_name_str = mem.name();
         let mem_name = Ident::new(&mem_name_str.to_sanitized_snake_case(), span);
         let ty_name = Ident::new(&mem_name_str.to_sanitized_pascal_case(), span);
+        let fty_name = quote!{ #fields_mod_name :: #ty_name };
 
         let mut mem_str_impl = TokenStream::new();
 
@@ -406,21 +424,21 @@ pub fn render_with_alts(structure: &Structure, alternatives: &Alternatives) -> R
                 mem_ty_gen.extend(quote! {#sty});
 
                 str_fns.extend(quote! {
-                    pub fn #mem_name(&mut self) -> #ty_name<#templ> {
-                        #ty_name::new(self)
+                    pub fn #mem_name(&mut self) -> #fty_name<#templ> {
+                        #fty_name::new(self)
                     }
                 });
 
                 mem_str_impl.extend(quote! {
                         #[inline(always)]
-                        pub fn read(&self) -> super::#pkg_name::R {
-                            super::#pkg_name::R::new(self.data.#mem_name)
+                        pub fn read(&self) -> super::super::#pkg_name::R {
+                            super::super::#pkg_name::R::new(self.data.#mem_name)
                         }
 
                         #[inline(always)]
-                        pub fn modify<F>(&'a mut self, f : F) -> &'a mut #str_name<#templ> where for <'w> F : FnOnce(&'w mut super::#pkg_name::W) -> &'w mut super::#pkg_name::W {
+                        pub fn modify<F>(&'a mut self, f : F) -> &'a mut super::#str_name<#templ> where for <'w> F : FnOnce(&'w mut super::super::#pkg_name::W) -> &'w mut super::super::#pkg_name::W {
                             let bits = self.data.#mem_name;
-                            self.data.#mem_name = **f(&mut super::#pkg_name::W::new(bits));
+                            self.data.#mem_name = **f(&mut super::super::#pkg_name::W::new(bits));
                             self.data
                         }
                 });
@@ -430,12 +448,12 @@ pub fn render_with_alts(structure: &Structure, alternatives: &Alternatives) -> R
                 read_mem.extend(quote! {
                     let mut buffer = [0u8; #bytes];
                     reader.read_exact(&mut buffer)?;
-                    let #mem_name = #sty::from_be_bytes(buffer);
+                    let #mem_name = #sty::from_le_bytes(buffer);
                 });
                 read_mems.extend(quote! {#mem_name, });
 
                 write_mem.extend(quote! {
-                    out.write(&self.#mem_name.to_be_bytes())?;
+                    out.write(&self.#mem_name.to_le_bytes())?;
                 });
             }
             StructMember::PrimitiveMember(mem) => {
@@ -447,8 +465,8 @@ pub fn render_with_alts(structure: &Structure, alternatives: &Alternatives) -> R
                 mem_ty_gen.extend(quote! {#sty});
 
                 str_fns.extend(quote! {
-                    pub fn #mem_name(&mut self) -> #ty_name<#templ> {
-                            #ty_name::new(self)
+                    pub fn #mem_name(&mut self) -> #fty_name<#templ> {
+                            #fty_name::new(self)
                         }
                 });
 
@@ -459,7 +477,7 @@ pub fn render_with_alts(structure: &Structure, alternatives: &Alternatives) -> R
                     }
 
                     #[inline(always)]
-                    pub fn set(&'a mut self, v : #sty) -> &'a mut #str_name<#templ> {
+                    pub fn set(&'a mut self, v : #sty) -> &'a mut super::#str_name<#templ> {
                         self.data.#mem_name = v;
                         self.data
                     }
@@ -470,12 +488,12 @@ pub fn render_with_alts(structure: &Structure, alternatives: &Alternatives) -> R
                 read_mem.extend(quote! {
                     let mut buffer = [0u8; #bytes];
                     reader.read_exact(&mut buffer)?;
-                    let #mem_name = #sty::from_be_bytes(buffer);
+                    let #mem_name = #sty::from_le_bytes(buffer);
                 });
                 read_mems.extend(quote! {#mem_name, });
 
                 write_mem.extend(quote! {
-                    out.write(&self.#mem_name.to_be_bytes())?;
+                    out.write(&self.#mem_name.to_le_bytes())?;
                 });
             }
             StructMember::AlternativesMember(alt) => {
@@ -491,8 +509,8 @@ pub fn render_with_alts(structure: &Structure, alternatives: &Alternatives) -> R
                 mem_ty_gen.extend(quote! {#alt_pc_a});
 
                 str_fns.extend(quote! {
-                    pub fn #mem_name(&mut self) -> #ty_name<#templ> {
-                        #ty_name::new(self)
+                    pub fn #mem_name(&mut self) -> #fty_name<#templ> {
+                        #fty_name::new(self)
                     }
                 });
 
@@ -503,7 +521,7 @@ pub fn render_with_alts(structure: &Structure, alternatives: &Alternatives) -> R
                     }
 
                     #[inline(always)]
-                    pub fn modify<F>(&'a mut self, f : F) -> &'a mut #str_name<#templ> where for <'w> F : FnOnce(&'w mut #alt_name_templ) -> &'w mut #alt_name_templ {
+                    pub fn modify<F>(&'a mut self, f : F) -> &'a mut super::#str_name<#templ> where for <'w> F : FnOnce(&'w mut #alt_name_templ) -> &'w mut #alt_name_templ {
                         let mut cp = self.data.#mem_name;
                         self.data.#mem_name = *f(&mut cp);
                         self.data
@@ -528,22 +546,16 @@ pub fn render_with_alts(structure: &Structure, alternatives: &Alternatives) -> R
         });
 
         str_items.extend(quote! {
-            pub struct #ty_name<'a, #templ> where #where_clause { data : &'a mut #str_name<#templ> }
+            pub struct #ty_name<'a, #templ> where #fields_where_clause { data : &'a mut super::#str_name<#templ> }
 
-            impl<'a, #templ> #ty_name<'a, #templ> where #where_clause {
+            impl<'a, #templ> #ty_name<'a, #templ> where #fields_where_clause {
                 #[inline(always)]
-                pub(crate) fn new(data : &'a mut #str_name<#templ>) -> Self {
+                pub(crate) fn new(data : &'a mut super::#str_name<#templ>) -> Self {
                     Self { data }
                 }
 
                 #mem_str_impl
             }
-        });
-    }
-
-    if !has_alt {
-        mod_items.extend(quote! {
-            #[derive(Copy,Clone)]
         });
     }
 
@@ -586,13 +598,28 @@ pub fn render_with_alts(structure: &Structure, alternatives: &Alternatives) -> R
         quote! { #read_fun }
     };
 
+    if !has_alt {
+        mod_items.extend(deriving_tokens());
+    }
+
+    if structure.members.len() > 1 {
+        mod_items.extend(quote! {
+            #[repr(packed)]
+        });
+    }
+
+    let fields_mod = if str_items.is_empty() {
+        str_items
+    } else {
+        quote! { mod #fields_mod_name { #str_items } }
+    };
+
     mod_items.extend(quote! {
-        #[repr(packed)]
         pub struct #str_name<#templ> where #where_clause {
             #str_mems
         }
 
-        #str_items
+        #fields_mod
 
         impl<#templ> #str_name<#templ> where #where_clause {
             #[inline(always)]
@@ -638,6 +665,7 @@ pub fn render_with_alts(structure: &Structure, alternatives: &Alternatives) -> R
 pub fn render_imports() -> TokenStream {
     quote! {
         use core2::io::{Error, Read, Write};
+        use defmt::Format;
     }
 }
 
